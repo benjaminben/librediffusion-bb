@@ -19,7 +19,7 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 # 89: 40xx
 # 120: 50xx
 set(CMAKE_CUDA_ARCHITECTURES 75-real 80-real 86-real 89-real 90-real 90a-real 100-real 103-real 110-real 120)
-set(CMAKE_CUDA_FLAGS "-use_fast_math ")#-arch=sm_75 -arch=sm_80 -arch=sm_86 -arch=sm_89 -arch=sm_90 -arch=sm_90a -arch=sm_100 -arch=sm_103 -arch=sm_110 -arch=sm_120 ")
+set(CMAKE_CUDA_FLAGS "-use_fast_math -Xcompiler=/Zc:preprocessor ")#-arch=sm_75 -arch=sm_80 -arch=sm_86 -arch=sm_89 -arch=sm_90 -arch=sm_90a -arch=sm_100 -arch=sm_103 -arch=sm_110 -arch=sm_120 ")
 if(NOT MSVC)
   set(CMAKE_C_FLAGS -Wno-deprecated )
   set(CMAKE_CXX_FLAGS "-Wno-deprecated -Wno-deprecated-declarations -flto -O3 -ffast-math")
@@ -57,7 +57,7 @@ corrosion_import_crate(
 
 # Find required packages
 find_package(CUDAToolkit REQUIRED)
-
+find_package(Boost REQUIRED)
 option(TENSORRT_RTX "Use trt rtx" OFF)
 if(WIN32)
 if(NOT TENSORRT_INCLUDE_DIR)
@@ -145,4 +145,5 @@ target_link_libraries(librediffusion PUBLIC
     CUDA::curand
     clip_tokenizer_c
     librediffusion_cuda
+    Boost::headers
 )
