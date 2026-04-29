@@ -8,6 +8,7 @@
 #include "kernels.hpp"
 #include "model_cache.hpp"
 #include "librediffusion.hpp" // For CUDATensor
+#include "debug_log.hpp"
 
 #include <cassert>
 #include <cstring>
@@ -42,11 +43,10 @@ std::string TensorRTLogger::severityToString(Severity severity)
 
 void TensorRTLogger::log(Severity severity, const char* msg) noexcept
 {
-  // Only log warnings and errors to avoid spam
-  if(severity < Severity::kWARNING)
+  // Log warnings and worse (kWARNING is enum value 2, kERROR is 1, kINTERNAL_ERROR is 0)
+  if(severity <= Severity::kWARNING)
   {
-    std::cout << "[TensorRT-RTX " << severityToString(severity) << "] " << msg
-              << std::endl;
+    DBG("[TRT " << severityToString(severity) << "] " << msg);
   }
 }
 
@@ -82,7 +82,7 @@ void UNetWrapper::loadEngine(const std::string& engine_path)
   }
 
   // Create our own execution context from the cached engine
-  std::cout << "Note: Using cached TensorRT engine for " << engine_path << std::endl;
+  DBG("Using cached TensorRT engine for " << engine_path);
   context_ = std::unique_ptr<nvinfer1::IExecutionContext>(
       cached_engine_->createExecutionContext());
 
@@ -401,7 +401,7 @@ void VAEEncoderWrapper::loadEngine(const std::string& engine_path)
   }
 
   // Create our own execution context from the cached engine
-  std::cout << "Note: Using cached TensorRT engine for " << engine_path << std::endl;
+  DBG("Using cached TensorRT engine for " << engine_path);
   context_ = std::unique_ptr<nvinfer1::IExecutionContext>(
       cached_engine_->createExecutionContext());
 
@@ -551,7 +551,7 @@ void VAEDecoderWrapper::loadEngine(const std::string& engine_path)
   }
 
   // Create our own execution context from the cached engine
-  std::cout << "Note: Using cached TensorRT engine for " << engine_path << std::endl;
+  DBG("Using cached TensorRT engine for " << engine_path);
   context_ = std::unique_ptr<nvinfer1::IExecutionContext>(
       cached_engine_->createExecutionContext());
 

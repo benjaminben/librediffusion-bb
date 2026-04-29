@@ -1,6 +1,7 @@
 #include "librediffusion.hpp"
 #include "tensorrt_wrappers.hpp"
 #include "kernels.hpp"
+#include "debug_log.hpp"
 
 namespace librediffusion
 {
@@ -8,6 +9,13 @@ namespace librediffusion
 void LibreDiffusionPipeline::img2img_impl(
     const __half* image_in, __half* image_out, cudaStream_t stream)
 {
+  static int _impl_half_count = 0;
+  if((_impl_half_count++ % 60) == 0)
+    DBG("img2img_impl(half): call #" << _impl_half_count
+        << " batch=" << config_.batch_size
+        << " latent=" << config_.latent_width << "x" << config_.latent_height
+        << " mode=" << (config_.mode == PipelineMode::TEMPORAL_V2V ? "v2v" : "single"));
+
   // Use internal stream_ if stream is 0 (default/null stream)
   if(stream == 0)
   {

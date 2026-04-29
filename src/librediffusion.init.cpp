@@ -3,6 +3,7 @@
 #include "kernels.hpp"
 #include "nchw.hpp"
 #include "tensorrt_wrappers.hpp"
+#include "debug_log.hpp"
 
 #include <cmath>
 
@@ -41,9 +42,14 @@ void LibreDiffusionPipeline::init_cuda()
 void LibreDiffusionPipeline::init_engines()
 {
   bool use_v2v = (config_.mode == PipelineMode::TEMPORAL_V2V);
+  DBG("init_engines: v2v=" << use_v2v);
+  DBG("  loading UNet: " << config_.unet_engine_path);
   unet_ = std::make_unique<UNetWrapper>(config_.unet_engine_path, use_v2v);
+  DBG("  loading VAE encoder: " << config_.vae_encoder_path);
   vae_encoder_ = std::make_unique<VAEEncoderWrapper>(config_.vae_encoder_path);
+  DBG("  loading VAE decoder: " << config_.vae_decoder_path);
   vae_decoder_ = std::make_unique<VAEDecoderWrapper>(config_.vae_decoder_path);
+  DBG("init_engines: complete");
 }
 
 void LibreDiffusionPipeline::init_buffers()

@@ -8,6 +8,7 @@
 #include "librediffusion_c.h"
 #include "librediffusion.hpp"
 #include "tensorrt_wrappers.hpp"
+#include "debug_log.hpp"
 
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -64,18 +65,26 @@ librediffusion_error_t try_catch_wrapper(Func&& func)
   try
   {
     func();
-    return check_cuda_error();
+    auto err = check_cuda_error();
+    if(err != LIBREDIFFUSION_SUCCESS)
+    {
+      DBG("!! check_cuda_error returned " << (int)err);
+    }
+    return err;
   }
-  catch (const std::bad_alloc&)
+  catch (const std::bad_alloc& e)
   {
+    DBG("!! std::bad_alloc: " << e.what());
     return LIBREDIFFUSION_ERROR_OUT_OF_MEMORY;
   }
-  catch (const std::exception&)
+  catch (const std::exception& e)
   {
+    DBG("!! std::exception: " << e.what());
     return LIBREDIFFUSION_ERROR_INTERNAL;
   }
   catch (...)
   {
+    DBG("!! unknown exception");
     return LIBREDIFFUSION_ERROR_INTERNAL;
   }
 }
@@ -313,6 +322,7 @@ librediffusion_config_set_unet_engine(
   if (!config || !path)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
+  DBG("config_set_unet_engine: " << path);
   return try_catch_wrapper([&]() {
     config->cpp_config.unet_engine_path = path;
   });
@@ -325,6 +335,7 @@ librediffusion_config_set_vae_encoder(
   if (!config || !path)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
+  DBG("config_set_vae_encoder: " << path);
   return try_catch_wrapper([&]() {
     config->cpp_config.vae_encoder_path = path;
   });
@@ -337,6 +348,7 @@ librediffusion_config_set_vae_decoder(
   if (!config || !path)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
+  DBG("config_set_vae_decoder: " << path);
   return try_catch_wrapper([&]() {
     config->cpp_config.vae_decoder_path = path;
   });
@@ -351,6 +363,13 @@ librediffusion_config_set_timestep_indices(
   if (count > 0 && !indices)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
+  {
+    std::ostringstream _oss;
+    _oss << "config_set_timestep_indices count=" << count << " values=[";
+    for (size_t i = 0; i < count; ++i) _oss << indices[i] << (i+1<count?",":"");
+    _oss << "]";
+    debug_log_line(_oss.str());
+  }
   return try_catch_wrapper([&]() {
     config->cpp_config.timestep_indices.assign(indices, indices + count);
   });
@@ -454,6 +473,9 @@ librediffusion_pipeline_create(
   if (!config || !pipeline)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
+  DBG("pipeline_create: unet=" << config->cpp_config.unet_engine_path
+                              << " vae_enc=" << config->cpp_config.vae_encoder_path
+                              << " vae_dec=" << config->cpp_config.vae_decoder_path);
   return try_catch_wrapper([&]() {
     auto p = new librediffusion_pipeline_t{};
     p->cpp_pipeline = std::make_unique<librediffusion::LibreDiffusionPipeline>(
@@ -474,6 +496,7 @@ librediffusion_pipeline_init_cuda(librediffusion_pipeline_handle pipeline)
   if (!pipeline || !pipeline->cpp_pipeline)
     return LIBREDIFFUSION_ERROR_NOT_INITIALIZED;
 
+  DBG("pipeline_init_cuda");
   return try_catch_wrapper([&]() {
     pipeline->cpp_pipeline->init_cuda();
   });
@@ -485,6 +508,7 @@ librediffusion_pipeline_init_npp(librediffusion_pipeline_handle pipeline)
   if (!pipeline || !pipeline->cpp_pipeline)
     return LIBREDIFFUSION_ERROR_NOT_INITIALIZED;
 
+  DBG("pipeline_init_npp");
   return try_catch_wrapper([&]() {
     pipeline->cpp_pipeline->init_npp();
   });
@@ -496,9 +520,12 @@ librediffusion_pipeline_init_engines(librediffusion_pipeline_handle pipeline)
   if (!pipeline || !pipeline->cpp_pipeline)
     return LIBREDIFFUSION_ERROR_NOT_INITIALIZED;
 
-  return try_catch_wrapper([&]() {
+  DBG("pipeline_init_engines: starting");
+  auto err = try_catch_wrapper([&]() {
     pipeline->cpp_pipeline->init_engines();
   });
+  DBG("pipeline_init_engines: done (err=" << (int)err << ")");
+  return err;
 }
 
 LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
@@ -507,6 +534,7 @@ librediffusion_pipeline_init_buffers(librediffusion_pipeline_handle pipeline)
   if (!pipeline || !pipeline->cpp_pipeline)
     return LIBREDIFFUSION_ERROR_NOT_INITIALIZED;
 
+  DBG("pipeline_init_buffers");
   return try_catch_wrapper([&]() {
     pipeline->cpp_pipeline->init_buffers();
   });
@@ -734,6 +762,9 @@ LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL librediffusion_img
   if (width <= 0 || height <= 0)
     return LIBREDIFFUSION_ERROR_INVALID_DIMENSIONS;
 
+  static int _img2img_count = 0;
+  if((_img2img_count++ % 60) == 0)
+    DBG("img2img: " << width << "x" << height << " (call #" << _img2img_count << ")");
   return try_catch_wrapper([&]() {
     pipeline->cpp_pipeline->img2img(cpu_rgba_input, cpu_rgba_output, width, height);
   });
@@ -769,6 +800,9 @@ librediffusion_img2img_gpu_half(
   if (!image_in || !image_out)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
+  static int _gpu_half_count = 0;
+  if((_gpu_half_count++ % 60) == 0)
+    DBG("img2img_gpu_half: call #" << _gpu_half_count);
   return try_catch_wrapper([&]() {
     pipeline->cpp_pipeline->img2img_impl(
         to_half_ptr(image_in),
@@ -1071,11 +1105,14 @@ librediffusion_clip_create(const char* engine_path, librediffusion_clip_handle* 
   if (!engine_path || !clip)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
-  return try_catch_wrapper([&]() {
+  DBG("clip_create: " << engine_path);
+  auto err = try_catch_wrapper([&]() {
     auto c = new librediffusion_clip_t{};
     c->cpp_clip = std::make_unique<librediffusion::CLIPWrapper>(engine_path);
     *clip = c;
   });
+  DBG("clip_create: done (err=" << (int)err << ")");
+  return err;
 }
 
 LIBREDIFFUSION_API void LIBREDIFFUSION_CALL
@@ -1094,6 +1131,7 @@ librediffusion_clip_compute_embeddings(
   if (!prompt || !embeddings)
     return LIBREDIFFUSION_ERROR_NULL_POINTER;
 
+  DBG("clip_compute_embeddings: prompt=\"" << prompt << "\" pad_token=" << pad_token);
   return try_catch_wrapper([&]() {
     __half* result = clip->cpp_clip->computeEmbeddings(
         prompt, to_cuda_stream(stream), pad_token);

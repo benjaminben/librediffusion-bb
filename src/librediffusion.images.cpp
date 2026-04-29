@@ -1,6 +1,7 @@
 #include "librediffusion.hpp"
 #include "kernels.hpp"
 #include "nchw.hpp"
+#include "debug_log.hpp"
 #include "iostream"
 
 namespace librediffusion
@@ -135,6 +136,7 @@ void LibreDiffusionPipeline::rgba_resize(
   // 6. Error Handling
   if(status != NPP_NO_ERROR)
   {
+    DBG("!! NPP Resize Error: " << (int)status);
     std::cerr << "NPP Resize Error: " << status << std::endl;
     // In production, handle this gracefully or throw
   }

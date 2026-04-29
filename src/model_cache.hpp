@@ -12,6 +12,8 @@
 #include "NvInfer.h"
 #include "NvInferRuntime.h"
 
+#include "debug_log.hpp"
+
 #include <cuda_runtime.h>
 
 #include <boost/unordered/concurrent_flat_map.hpp>
@@ -636,13 +638,17 @@ private:
 inline std::shared_ptr<CachedTensorRTEngine>
 loadEngineFromFile(const std::string& engine_path, nvinfer1::ILogger& logger)
 {
+  DBG("loadEngineFromFile: " << engine_path);
+
   // Create the file stream reader
   FileStreamReader stream_reader(engine_path);
   if(!stream_reader.isValid())
   {
+    DBG("!! Failed to open engine file: " << engine_path);
     fprintf(stderr, " !! Failed to open engine file: %s\n", engine_path.c_str());
     return nullptr;
   }
+  DBG("  file opened, size=" << stream_reader.fileSize());
 
   // Mem info
   {
@@ -668,13 +674,17 @@ loadEngineFromFile(const std::string& engine_path, nvinfer1::ILogger& logger)
     cudaMemGetInfo(&f, &t);
     // Not enough memory to load the model
     if(f < sz)
+    {
+      DBG("!! Not enough GPU memory: free=" << f << " required=" << sz);
       return nullptr;
+    }
   }
 
   // Create runtime
   nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(logger);
   if(!runtime)
   {
+    DBG("!! Failed to create TensorRT runtime");
     fprintf(stderr, " !! Failed to create TensorRT runtime\n");
     return nullptr;
   }
@@ -683,9 +693,11 @@ loadEngineFromFile(const std::string& engine_path, nvinfer1::ILogger& logger)
   runtime->setEngineHostCodeAllowed(true);
 
   // Deserialize engine using streaming API
+  DBG("  deserializing " << engine_path << "...");
   nvinfer1::ICudaEngine* engine = runtime->deserializeCudaEngine(stream_reader);
   if(!engine)
   {
+    DBG("!! Failed to deserialize engine: " << engine_path);
     fprintf(
         stderr, " !! Failed to deserialize engine from stream: %s\n",
         engine_path.c_str());
@@ -693,6 +705,7 @@ loadEngineFromFile(const std::string& engine_path, nvinfer1::ILogger& logger)
     delete runtime;
     return nullptr;
   }
+  DBG("  deserialized OK: " << engine_path);
 
   return std::make_shared<CachedTensorRTEngine>(runtime, engine);
 }
