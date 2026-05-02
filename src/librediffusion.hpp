@@ -77,6 +77,10 @@ struct LibreDiffusionConfig
   std::string vae_encoder_path = "engines/vae_encoder.engine";
   std::string vae_decoder_path = "engines/vae_decoder.engine";
 
+  // ControlNet (v1): combined UNet+ControlNet engine. When non-empty this overrides
+  // unet_engine_path and switches the pipeline into combined-engine mode.
+  std::string combined_unet_controlnet_engine_path;
+
   std::vector<int> timestep_indices;
 
   // StreamV2V temporal coherence parameters
@@ -292,6 +296,20 @@ public:
   float* img_preprocess(const uint8_t* device_rgba_input, int width, int height);
   uint8_t* img_postprocess(__half* device_rgba_output, int width, int height);
 
+  // ControlNet (v1): combined UNet+ControlNet engine inputs.
+  // No-op when combined-engine mode is off.
+  // set_control_image_gpu performs RGBA NHWC uint8 -> RGB NCHW fp16 conversion
+  // directly into the persistent control_image_nchw_ buffer (no staging copies).
+  void set_control_image_gpu(
+      const uint8_t* device_rgba_input, int width, int height,
+      cudaStream_t stream = 0);
+  void set_control_image(
+      const uint8_t* cpu_rgba_input, int width, int height);
+  void set_controlnet_strength(float strength);
+
+  bool combined_engine_mode() const { return combined_engine_mode_; }
+  bool has_control_image() const { return control_image_bound_; }
+
   // StreamV2V temporal coherence methods
   void enableTemporalCoherence(
       bool use_feature_injection = true,
@@ -379,6 +397,15 @@ public:
 
   // StreamV2V temporal state
   TemporalState temporal_state_;
+
+  // ControlNet (v1): allocated only when combined_engine_mode_ is true.
+  // control_image_nchw_ is the persistent NCHW fp16 buffer bound directly
+  // to the engine's "control_image" input. set_control_image_gpu writes
+  // into this buffer in one pass (no staging copies).
+  bool combined_engine_mode_ = false;
+  bool control_image_bound_ = false;
+  std::unique_ptr<CUDATensor<__half>> control_image_nchw_;     // [1, 3, H, W]
+  std::unique_ptr<CUDATensor<__half>> controlnet_strength_;    // [1]
 
   // Internal operations
   void add_noise(

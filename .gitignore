@@ -335,3 +335,14 @@ CMakeUserPresets.json
 *.ptx
 *.cubin
 *.fatbin
+
+# librediffusion: test_engine.py outputs (fixtures themselves are checked in)
+test_output*.png
+tools/test_data/output*.png
+tools/test_data/test_output*.png
+
+# librediffusion: TensorRT engines and intermediate ONNX
+engines/
+*.engine
+*.engine.meta.json
+tools/*.onnx

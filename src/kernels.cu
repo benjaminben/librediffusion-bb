@@ -939,3 +939,49 @@ void launch_rgb_to_rgba_denormalized_fp16(
     rgb_to_rgba_denormalized_fp16_kernel<<<grid_size, block_size, 0, stream>>>(
         (const __half*)rgb_in, (uint8_t*)rgba_out, n, h, w);
 }
+
+// Fused RGBA NHWC uint8 -> RGB NCHW fp16 (one pass, direct write).
+// Each thread handles one (n, y, x) pixel and scatters the three normalized
+// channels into the NCHW output: rgb_nchw_out[((n * 3) + c) * H*W + y*W + x].
+__global__ void rgba_nhwc_uint8_to_rgb_nchw_fp16_kernel(
+    const uint8_t* __restrict__ rgba_in,
+    __half* __restrict__ rgb_nchw_out,
+    int n, int h, int w)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int hw = h * w;
+    int total_pixels = n * hw;
+    if (idx >= total_pixels) return;
+
+    int batch = idx / hw;
+    int spatial = idx - batch * hw;
+
+    int rgba_idx = idx * 4;
+    // ControlNet's controlnet_cond_embedding expects [0, 1], not [-1, 1].
+    // Diffusers' standard preprocessing for control images is image/255.
+    float r = float(rgba_in[rgba_idx + 0]) / 255.0f;
+    float g = float(rgba_in[rgba_idx + 1]) / 255.0f;
+    float b = float(rgba_in[rgba_idx + 2]) / 255.0f;
+
+    int channel_stride = hw;
+    int batch_stride = 3 * hw;
+    int base = batch * batch_stride + spatial;
+    rgb_nchw_out[base + 0 * channel_stride] = __float2half(r);
+    rgb_nchw_out[base + 1 * channel_stride] = __float2half(g);
+    rgb_nchw_out[base + 2 * channel_stride] = __float2half(b);
+}
+
+void launch_rgba_nhwc_uint8_to_rgb_nchw_fp16(
+    const void* rgba_in,
+    void* rgb_nchw_out,
+    int n, int h, int w,
+    void* stream_ptr)
+{
+    cudaStream_t stream = (cudaStream_t)stream_ptr;
+    int total_pixels = n * h * w;
+    int block_size = 256;
+    int grid_size = (total_pixels + block_size - 1) / block_size;
+
+    rgba_nhwc_uint8_to_rgb_nchw_fp16_kernel<<<grid_size, block_size, 0, stream>>>(
+        (const uint8_t*)rgba_in, (__half*)rgb_nchw_out, n, h, w);
+}

@@ -101,6 +101,18 @@ public:
     return attention_output_buffers_;
   }
 
+  /**
+   * ControlNet (v1, combined engine): bind the two extra engine inputs.
+   * Stored as raw device pointers and applied inside forward() right after
+   * the standard inputs are bound. Pass nullptrs to disable.
+   */
+  void setCombinedControlNetInputs(
+      const __half* control_image_nchw, const __half* controlnet_strength)
+  {
+    control_image_input_ = control_image_nchw;
+    controlnet_strength_input_ = controlnet_strength;
+  }
+
 private:
   std::shared_ptr<CachedTensorRTEngine> cached_engine_;  // Shared cached engine
   std::unique_ptr<nvinfer1::IExecutionContext> context_; // Per-wrapper context
@@ -128,6 +140,12 @@ private:
   // SDXL-specific buffers
   std::unique_ptr<CUDATensor<__half>> text_embeds_buffer_;
   std::unique_ptr<CUDATensor<__half>> time_ids_buffer_;
+
+  // ControlNet (v1, combined engine): extra input device pointers bound
+  // by the caller via setCombinedControlNetInputs. Applied inside forward()
+  // when both are non-null. Owned by the pipeline, not the wrapper.
+  const __half* control_image_input_ = nullptr;
+  const __half* controlnet_strength_input_ = nullptr;
 
   // StreamV2V attention caching
   bool use_v2v_ = false;

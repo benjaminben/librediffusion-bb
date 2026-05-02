@@ -355,6 +355,21 @@ librediffusion_config_set_vae_decoder(
 }
 
 LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_config_set_combined_unet_controlnet_engine(
+    librediffusion_config_handle config, const char* path)
+{
+  if (!config)
+    return LIBREDIFFUSION_ERROR_NULL_POINTER;
+
+  // path may be null/empty to disable combined-engine mode.
+  const char* p = path ? path : "";
+  DBG("config_set_combined_unet_controlnet_engine: " << p);
+  return try_catch_wrapper([&]() {
+    config->cpp_config.combined_unet_controlnet_engine_path = p;
+  });
+}
+
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
 librediffusion_config_set_timestep_indices(
     librediffusion_config_handle config, const int* indices, size_t count)
 {
@@ -744,6 +759,72 @@ librediffusion_set_delta(librediffusion_pipeline_handle pipeline, float delta)
 
   return try_catch_wrapper([&]() {
     pipeline->cpp_pipeline->set_delta(delta);
+  });
+}
+
+/*===========================================================================*/
+/* ControlNet Per-Frame Inputs (v1, combined engine)                         */
+/*===========================================================================*/
+
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_set_control_image(
+    librediffusion_pipeline_handle pipeline, const uint8_t* cpu_rgba_input,
+    int width, int height)
+{
+  if (!pipeline || !pipeline->cpp_pipeline)
+    return LIBREDIFFUSION_ERROR_NOT_INITIALIZED;
+  if (!cpu_rgba_input)
+    return LIBREDIFFUSION_ERROR_NULL_POINTER;
+  if (width <= 0 || height <= 0)
+    return LIBREDIFFUSION_ERROR_INVALID_DIMENSIONS;
+
+  // No-op when combined-engine mode is off (matches set_control_image_gpu).
+  if (!pipeline->cpp_pipeline->combined_engine_mode())
+    return LIBREDIFFUSION_SUCCESS;
+
+  const auto& cfg = pipeline->cpp_pipeline->config();
+  if (width != cfg.width || height != cfg.height)
+    return LIBREDIFFUSION_ERROR_INVALID_DIMENSIONS;
+
+  return try_catch_wrapper([&]() {
+    pipeline->cpp_pipeline->set_control_image(cpu_rgba_input, width, height);
+  });
+}
+
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_set_control_image_gpu(
+    librediffusion_pipeline_handle pipeline, const uint8_t* device_rgba_input,
+    int width, int height, librediffusion_stream_t stream)
+{
+  if (!pipeline || !pipeline->cpp_pipeline)
+    return LIBREDIFFUSION_ERROR_NOT_INITIALIZED;
+  if (!device_rgba_input)
+    return LIBREDIFFUSION_ERROR_NULL_POINTER;
+  if (width <= 0 || height <= 0)
+    return LIBREDIFFUSION_ERROR_INVALID_DIMENSIONS;
+
+  if (!pipeline->cpp_pipeline->combined_engine_mode())
+    return LIBREDIFFUSION_SUCCESS;
+
+  const auto& cfg = pipeline->cpp_pipeline->config();
+  if (width != cfg.width || height != cfg.height)
+    return LIBREDIFFUSION_ERROR_INVALID_DIMENSIONS;
+
+  return try_catch_wrapper([&]() {
+    pipeline->cpp_pipeline->set_control_image_gpu(
+        device_rgba_input, width, height, to_cuda_stream(stream));
+  });
+}
+
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_set_controlnet_strength(
+    librediffusion_pipeline_handle pipeline, float strength)
+{
+  if (!pipeline || !pipeline->cpp_pipeline)
+    return LIBREDIFFUSION_ERROR_NOT_INITIALIZED;
+
+  return try_catch_wrapper([&]() {
+    pipeline->cpp_pipeline->set_controlnet_strength(strength);
   });
 }
 

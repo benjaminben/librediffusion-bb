@@ -42,9 +42,19 @@ void LibreDiffusionPipeline::init_cuda()
 void LibreDiffusionPipeline::init_engines()
 {
   bool use_v2v = (config_.mode == PipelineMode::TEMPORAL_V2V);
-  DBG("init_engines: v2v=" << use_v2v);
-  DBG("  loading UNet: " << config_.unet_engine_path);
-  unet_ = std::make_unique<UNetWrapper>(config_.unet_engine_path, use_v2v);
+
+  // ControlNet (v1): if a combined UNet+ControlNet engine path is set, it
+  // overrides the plain unet engine. The wrapper is the same; the engine
+  // itself just has two extra inputs (control_image, controlnet_strength).
+  combined_engine_mode_ = !config_.combined_unet_controlnet_engine_path.empty();
+  const std::string& unet_path = combined_engine_mode_
+                                     ? config_.combined_unet_controlnet_engine_path
+                                     : config_.unet_engine_path;
+
+  DBG("init_engines: v2v=" << use_v2v
+                           << " combined_engine=" << combined_engine_mode_);
+  DBG("  loading UNet: " << unet_path);
+  unet_ = std::make_unique<UNetWrapper>(unet_path, use_v2v);
   DBG("  loading VAE encoder: " << config_.vae_encoder_path);
   vae_encoder_ = std::make_unique<VAEEncoderWrapper>(config_.vae_encoder_path);
   DBG("  loading VAE decoder: " << config_.vae_decoder_path);
@@ -54,6 +64,24 @@ void LibreDiffusionPipeline::init_engines()
 
 void LibreDiffusionPipeline::init_buffers()
 {
+  // ControlNet (v1) inference configuration lock. When the combined
+  // UNet+ControlNet engine is loaded, the pipeline only supports the
+  // realtime live-visuals configuration: batch=1, denoising_steps=1,
+  // frame_buffer_size=1, cfg_type in {none, self}. Other configs require
+  // the (B) separate-engine path which is deferred to v2+.
+  if(combined_engine_mode_)
+  {
+    if(config_.batch_size != 1 || config_.denoising_steps != 1
+       || config_.frame_buffer_size != 1
+       || (config_.cfg_type != 0 && config_.cfg_type != 2))
+    {
+      throw std::runtime_error(
+          "ControlNet v1 requires batch_size=1, denoising_steps=1, "
+          "frame_buffer_size=1, cfg_type in {none, self}. Other "
+          "configurations require the v2+ separate-engine path.");
+    }
+  }
+
   // Calculate sizes
   int latent_size
       = config_.batch_size * 4 * config_.latent_height * config_.latent_width;
@@ -184,6 +212,29 @@ void LibreDiffusionPipeline::init_buffers()
 
   unet_output_buffer_ = std::make_unique<CUDATensor<__half>>(
       max_unet_batch * 4 * config_.latent_height * config_.latent_width);
+
+  // ControlNet (v1): allocate persistent control-image and strength buffers
+  // only when combined-engine mode is active. Default strength is 1.0;
+  // control image must be bound by the caller before the first inference.
+  if(combined_engine_mode_)
+  {
+    int control_image_size
+        = config_.batch_size * 3 * config_.height * config_.width;
+    control_image_nchw_ = std::make_unique<CUDATensor<__half>>(control_image_size);
+    controlnet_strength_ = std::make_unique<CUDATensor<__half>>(1);
+
+    __half default_strength = __float2half(1.0f);
+    cudaMemcpyAsync(
+        controlnet_strength_->data(), &default_strength, sizeof(__half),
+        cudaMemcpyHostToDevice, stream_);
+    control_image_bound_ = false;
+  }
+  else
+  {
+    control_image_nchw_.reset();
+    controlnet_strength_.reset();
+    control_image_bound_ = false;
+  }
 
   // Initialize StreamV2V temporal state (only if mode is TEMPORAL_V2V)
   if(config_.mode == PipelineMode::TEMPORAL_V2V)

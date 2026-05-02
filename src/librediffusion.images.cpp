@@ -107,6 +107,76 @@ void LibreDiffusionPipeline::nchw_to_rgba_nhwc_gpu(
       rgb_nhwc_tmp_fp32_->data(), rgba_nhwc_out, batch_size, height, width, stream);
 }
 
+// ControlNet (v1): write RGBA NHWC uint8 control image directly into the
+// persistent NCHW fp16 control buffer in one fused pass. No staging copies.
+void LibreDiffusionPipeline::set_control_image_gpu(
+    const uint8_t* device_rgba_input, int width, int height, cudaStream_t stream)
+{
+  if(!combined_engine_mode_)
+    return; // no-op when ControlNet is not enabled
+
+  if(!device_rgba_input)
+    throw std::runtime_error("set_control_image_gpu: null input");
+  if(width != config_.width || height != config_.height)
+  {
+    throw std::runtime_error(
+        "set_control_image_gpu: dimension mismatch — control image must match "
+        "pipeline width/height");
+  }
+  if(!control_image_nchw_)
+  {
+    throw std::runtime_error(
+        "set_control_image_gpu: control buffer not allocated (init_buffers not called?)");
+  }
+
+  if(!stream)
+    stream = stream_;
+
+  launch_rgba_nhwc_uint8_to_rgb_nchw_fp16(
+      device_rgba_input, control_image_nchw_->data(),
+      config_.batch_size, height, width, stream);
+
+  control_image_bound_ = true;
+}
+
+void LibreDiffusionPipeline::set_control_image(
+    const uint8_t* cpu_rgba_input, int width, int height)
+{
+  if(!combined_engine_mode_)
+    return;
+  if(!cpu_rgba_input)
+    throw std::runtime_error("set_control_image: null input");
+  if(width != config_.width || height != config_.height)
+  {
+    throw std::runtime_error(
+        "set_control_image: dimension mismatch — control image must match "
+        "pipeline width/height");
+  }
+
+  size_t rgba_bytes
+      = static_cast<size_t>(config_.batch_size) * width * height * 4;
+
+  // Stage RGBA on device, then run the same fused conversion.
+  CUDATensor<uint8_t> device_rgba(rgba_bytes);
+  cudaMemcpyAsync(
+      device_rgba.data(), cpu_rgba_input, rgba_bytes, cudaMemcpyHostToDevice, stream_);
+  set_control_image_gpu(device_rgba.data(), width, height, stream_);
+  cudaStreamSynchronize(stream_);
+}
+
+void LibreDiffusionPipeline::set_controlnet_strength(float strength)
+{
+  if(!combined_engine_mode_)
+    return;
+  if(!controlnet_strength_)
+    return;
+
+  __half h_value = __float2half(strength);
+  cudaMemcpyAsync(
+      controlnet_strength_->data(), &h_value, sizeof(__half),
+      cudaMemcpyHostToDevice, stream_);
+}
+
 void LibreDiffusionPipeline::rgba_resize(
     Npp8u* device_rgba_input_, int iw, int ih, Npp8u* device_rgba_resized_, int ow,
     int oh)

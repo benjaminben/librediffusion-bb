@@ -1081,6 +1081,21 @@ void LibreDiffusionPipeline::predict_x0_batch_impl_single_step(
     }
   }
 
+  // ControlNet (v1, combined engine): bind the two extra engine inputs.
+  // The branch is a single predicted-not-taken comparison when ControlNet
+  // is off — preserving the zero-cost-when-off invariant.
+  if(combined_engine_mode_)
+  {
+    if(!control_image_bound_)
+    {
+      throw std::runtime_error(
+          "ControlNet combined-engine mode is on but no control image has "
+          "been bound. Call set_control_image_gpu before inference.");
+    }
+    unet_->setCombinedControlNetInputs(
+        control_image_nchw_->data(), controlnet_strength_->data());
+  }
+
   // Run UNet inference - use SDXL variant if configured
   if(config_.model_type == ModelType::SDXL_TURBO)
   {

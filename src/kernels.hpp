@@ -93,6 +93,16 @@ void launch_weighted_accumulate_fp16(
 // Zero-fill a buffer with FP16 zeros
 void launch_zero_fill_fp16(void* output, int N, void* stream_ptr);
 
+// Fused RGBA NHWC uint8 -> RGB NCHW fp16 conversion. Writes directly into the
+// destination buffer in a single pass (no NHWC staging buffer). Used by
+// ControlNet's set_control_image_gpu which binds the destination as the
+// engine's "control_image" input tensor.
+void launch_rgba_nhwc_uint8_to_rgb_nchw_fp16(
+    const void* rgba_in,
+    void* rgb_nchw_out,
+    int n, int h, int w,
+    void* stream_ptr);
+
 // RGB to RGBA denormalization kernels
 void launch_rgb_to_rgba_denormalized_fp32(
     const void* rgb_in,

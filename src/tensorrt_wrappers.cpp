@@ -193,6 +193,24 @@ void UNetWrapper::forward(
     throw std::runtime_error("Failed to set latent tensor address");
   }
 
+  // ControlNet (v1, combined engine): bind the two extra inputs. The
+  // engine was built with fixed shapes [1, 3, height*8, width*8] for
+  // control_image and [1] for controlnet_strength, so no setInputShape
+  // is needed — TRT picks them up from the engine definition.
+  if(control_image_input_ && controlnet_strength_input_)
+  {
+    if(!context_->setTensorAddress(
+           "control_image", const_cast<__half*>(control_image_input_)))
+    {
+      throw std::runtime_error("Failed to set control_image tensor address");
+    }
+    if(!context_->setTensorAddress(
+           "controlnet_strength", const_cast<__half*>(controlnet_strength_input_)))
+    {
+      throw std::runtime_error("Failed to set controlnet_strength tensor address");
+    }
+  }
+
   // StreamV2V: Set attention output tensor addresses
   if(use_v2v_)
   {

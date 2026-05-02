@@ -209,6 +209,22 @@ LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
 librediffusion_config_set_vae_decoder(
     librediffusion_config_handle config, const char* path);
 
+/**
+ * ControlNet (v1, combined engine).
+ *
+ * When set to a non-null, non-empty path this overrides
+ * `librediffusion_config_set_unet_engine` and switches the pipeline into
+ * combined-engine mode. The combined engine extends the standard UNet
+ * with two additional inputs ("control_image" and "controlnet_strength")
+ * and folds ControlNet residual addition into the engine itself.
+ *
+ * When unset (default), pipeline behavior is byte-for-byte identical to
+ * the plain-UNet code path — same engine, same per-frame cost.
+ */
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_config_set_combined_unet_controlnet_engine(
+    librediffusion_config_handle config, const char* path);
+
 /* Timestep indices (array copy) */
 LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
 librediffusion_config_set_timestep_indices(
@@ -458,6 +474,49 @@ librediffusion_set_guidance_scale(
  */
 LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
 librediffusion_set_delta(librediffusion_pipeline_handle pipeline, float delta);
+
+/*===========================================================================*/
+/* ControlNet Per-Frame Inputs (v1, combined engine)                         */
+/*===========================================================================*/
+
+/**
+ * Bind a per-frame control image (CPU RGBA NHWC uint8). The image is
+ * converted to NCHW fp16 and cached in a persistent buffer; the next
+ * inference call will consume it. Caller may re-use the previously bound
+ * control image by skipping this call.
+ *
+ * If combined-engine mode is OFF this call is a no-op.
+ * Returns LIBREDIFFUSION_ERROR_INVALID_DIMENSIONS if width/height differ
+ * from the pipeline's configured dimensions.
+ */
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_set_control_image(
+    librediffusion_pipeline_handle pipeline, const uint8_t* cpu_rgba_input,
+    int width, int height);
+
+/**
+ * Bind a per-frame control image (GPU device pointer, RGBA NHWC uint8).
+ * The conversion to NCHW fp16 is fused and writes directly into the
+ * persistent engine input buffer (no staging copies).
+ *
+ * If combined-engine mode is OFF this call is a no-op.
+ * Returns LIBREDIFFUSION_ERROR_INVALID_DIMENSIONS if width/height differ
+ * from the pipeline's configured dimensions.
+ */
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_set_control_image_gpu(
+    librediffusion_pipeline_handle pipeline, const uint8_t* device_rgba_input,
+    int width, int height, librediffusion_stream_t stream);
+
+/**
+ * Set the global ControlNet conditioning strength. Applied as a scalar
+ * multiplier to the ControlNet residuals inside the combined engine.
+ *
+ * If combined-engine mode is OFF this call is a no-op.
+ */
+LIBREDIFFUSION_API librediffusion_error_t LIBREDIFFUSION_CALL
+librediffusion_set_controlnet_strength(
+    librediffusion_pipeline_handle pipeline, float strength);
 
 /*===========================================================================*/
 /* High-Level Inference API (CPU buffers)                                    */
