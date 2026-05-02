@@ -251,6 +251,43 @@ def make_sd_turbo_scheduler_at(t_index: int, num_inference_steps: int = 50,
             np.float32(float(c_out)))
 
 
+def make_hyper_sd_scheduler_at(t_index: int, num_inference_steps: int = 1,
+                               base_model: str = "runwayml/stable-diffusion-v1-5"):
+    """Return scheduler params for SD-1.5 + Hyper-SD-1step using TCDScheduler.
+
+    Hyper-SD's model card recommends TCDScheduler with eta=1.0; the 1-step
+    variant collapses denoising to a single TCD step (so `num_inference_steps=1`
+    -> only t_index=0 is valid). Higher counts match the 2/4/8-step Hyper-SD
+    variants.
+
+    TCDScheduler doesn't expose `get_scalings_for_boundary_condition_discrete`
+    (that's LCM-only), so we inline the formula. Both schedulers use
+    sigma_data=0.5 and config.timestep_scaling (default 10) -- the math is
+    identical to LCM's helper, just spelled out.
+    """
+    from diffusers import TCDScheduler
+    scheduler = TCDScheduler.from_pretrained(base_model, subfolder="scheduler")
+    scheduler.set_timesteps(num_inference_steps)
+    if t_index < 0 or t_index >= num_inference_steps:
+        raise ValueError(
+            f"--timestep must be in [0, {num_inference_steps - 1}] (TCD index); got {t_index}"
+        )
+    timestep_int = int(scheduler.timesteps[t_index].item())
+    sigma_data = 0.5
+    timestep_scaling = float(getattr(scheduler.config, "timestep_scaling", 10.0))
+    scaled_t = timestep_int * timestep_scaling
+    c_skip = sigma_data ** 2 / (scaled_t ** 2 + sigma_data ** 2)
+    c_out = scaled_t / (scaled_t ** 2 + sigma_data ** 2) ** 0.5
+    alpha_prod_t = scheduler.alphas_cumprod[timestep_int]
+    a_sqrt = float(alpha_prod_t.sqrt())
+    b_sqrt = float((1 - alpha_prod_t).sqrt())
+    return (np.float32(timestep_int),
+            np.float32(a_sqrt),
+            np.float32(b_sqrt),
+            np.float32(float(c_skip)),
+            np.float32(float(c_out)))
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -276,6 +313,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--guidance", type=float, default=1.2)
     p.add_argument("--text-hidden-dim", type=int, default=1024,
                    help="SD-Turbo: 1024; SD1.5: 768")
+    p.add_argument("--scheduler", choices=["sd-turbo", "hyper-sd"], default="sd-turbo",
+                   help="Scheduler factory: sd-turbo (LCMScheduler from "
+                        "stabilityai/sd-turbo, 50 inference steps; default) "
+                        "or hyper-sd (TCDScheduler from runwayml/stable-diffusion-v1-5, "
+                        "1 inference step -- for SD-1.5 stacks with Hyper-SD-1step "
+                        "fused). The C++ runtime config is identical between the "
+                        "two; only the (timestep, alpha, beta, c_skip, c_out) tuple "
+                        "differs.")
     p.add_argument("--output", default="./test_output.png")
     p.add_argument("--display", action="store_true")
     p.add_argument("--dll", default=None,
@@ -346,7 +391,10 @@ def main() -> int:
                 api["clip_destroy"](clip)
 
             # Scheduler
-            t, a, b, cs, co = make_sd_turbo_scheduler_at(args.timestep)
+            if args.scheduler == "hyper-sd":
+                t, a, b, cs, co = make_hyper_sd_scheduler_at(args.timestep)
+            else:
+                t, a, b, cs, co = make_sd_turbo_scheduler_at(args.timestep)
             ts_arr = (ctypes.c_float * 1)(t)
             a_arr = (ctypes.c_float * 1)(a)
             b_arr = (ctypes.c_float * 1)(b)
